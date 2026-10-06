@@ -1,0 +1,5 @@
+# Latency targets per workload class. A volume's class is set in compliance.yaml.
+classes:
+  oltp:    {p95_latency_ms: 1.0}      # databases, interactive apps
+  general: {p95_latency_ms: 10.0}     # file shares, source control, web
+  backup:  {p95_latency_ms: 1000.0}   # backups and archives: throughput only

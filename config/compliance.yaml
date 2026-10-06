@@ -1,0 +1,22 @@
+# Compliance and workload tags per volume (MSR Cambridge volume names).
+# These tags are synthetic: public traces carry no compliance metadata.
+defaults:
+  data_class: general
+  sla_class: general
+  retention_days: 365
+  residency: any
+  legal_hold: false
+  encryption_required: false
+volumes:
+  hm_0:    {data_class: logs,      sla_class: general}
+  mds_0:   {data_class: media,     sla_class: general}
+  prn_0:   {data_class: logs,      sla_class: backup,  retention_days: 90}
+  proj_0:  {data_class: general,   sla_class: general}
+  prxy_0:  {data_class: logs,      sla_class: general, retention_days: 180}
+  rsrch_0: {data_class: research,  sla_class: general, residency: in}
+  src1_2:  {data_class: source,    sla_class: general, legal_hold: true}
+  stg_0:   {data_class: general,   sla_class: general}
+  ts_0:    {data_class: pii,       sla_class: oltp,    residency: in, encryption_required: true}
+  usr_0:   {data_class: pii,       sla_class: general, residency: in, encryption_required: true}
+  wdev_0:  {data_class: general,   sla_class: general}
+  web_0:   {data_class: financial, sla_class: oltp,    retention_days: 2555, residency: in}

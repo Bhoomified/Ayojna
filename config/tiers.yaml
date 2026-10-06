@@ -1,0 +1,30 @@
+# Storage tiers used by the digital twin and the planner.
+# Prices are approximate public cloud list prices in USD per GB-month.
+# They are inputs, not facts: edit them freely, the code reads this file.
+currency: USD
+tiers:
+  hot:      # NVMe / premium block storage
+    base_latency_ms: 0.1
+    price_gb_month: 0.100
+    retrieval_per_gb: 0.0
+    min_storage_days: 0
+    capacity_share: 0.15   # share of total capacity this tier can hold
+  warm:     # standard SSD / standard object storage
+    base_latency_ms: 0.5
+    price_gb_month: 0.045
+    retrieval_per_gb: 0.0
+    min_storage_days: 0
+    capacity_share: 0.35
+  cold:     # HDD / infrequent-access object storage
+    base_latency_ms: 8.0
+    price_gb_month: 0.0125
+    retrieval_per_gb: 0.01
+    min_storage_days: 30
+    capacity_share: 1.0
+  archive:  # deep archive: cheap to keep, slow and costly to read
+    base_latency_ms: 3600000.0
+    price_gb_month: 0.002
+    retrieval_per_gb: 0.02
+    min_storage_days: 90
+    capacity_share: 1.0
+move_cost_per_gb: 0.001   # cost of copying 1 GB between tiers
