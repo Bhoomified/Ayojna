@@ -1,0 +1,7 @@
+# Hotness labels: what counts as hot / warm / cold over the NEXT 24 hours.
+labels:
+  horizon_hours: 24
+  hot_min_accesses: 50   # >= this many I/Os in the next 24 h = hot
+                         # 1..49 = warm, 0 = cold
+split:
+  test_hours: 24         # the last N labelled hours are the test set (never trained on)
