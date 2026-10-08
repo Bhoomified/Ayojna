@@ -27,6 +27,12 @@
   .scroll { overflow:auto; max-height:360px; }
   .t-hot{color:var(--hot)} .t-warm{color:var(--warm)} .t-cold{color:var(--cold)} .t-archive{color:var(--archive)}
   .muted { color:var(--muted); } h2 .muted { text-transform:none; font-weight:400; letter-spacing:0; } canvas { max-height:280px; }
+    .ask { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+  .ask input { flex:1 1 260px; min-width:0; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:9px 12px; font:inherit; }
+  button { background:var(--line); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:8px 12px; font:inherit; cursor:pointer; }
+  button:hover { border-color:var(--muted); } .chip { font-size:12px; padding:4px 10px; border-radius:999px; }
+  #answer { margin-top:12px; white-space:pre-wrap; } .src { font-size:11px; padding:2px 8px; border-radius:999px; margin-right:6px; }
+  .src.llm { background:#123d2c; color:var(--ok); } .src.template { background:var(--line); color:var(--muted); }
   @media (max-width:600px) { header, main { padding-left:16px; padding-right:16px; } }
 </style>
 </head>
@@ -47,6 +53,11 @@
   </section>
   <section class="card"><h2>Latest plan <span id="planMeta" class="muted"></span></h2>
     <div class="scroll"><table><thead><tr><th>Extent</th><th>Move</th><th>$ / month</th><th>Risk</th><th>Why</th></tr></thead><tbody id="moves"></tbody></table></div>
+  </section>
+  <section class="card"><h2>Ask Ayojna <span id="llm" class="muted"></span></h2>
+    <div id="chips" class="ask"></div>
+    <form id="askForm" class="ask"><input id="q" maxlength="500" placeholder="e.g. why is web_0/3 on warm?" autocomplete="off"><button type="submit">Ask</button></form>
+    <div id="answer" class="muted">Answers come only from the live facts above. The copilot explains; it never moves data.</div>
   </section>
   <section class="card"><h2>Audit trail</h2>
     <div class="scroll"><table><thead><tr><th>Time</th><th>Run</th><th>Token</th><th>Event</th><th>Detail</th></tr></thead><tbody id="audit"></tbody></table></div>
@@ -141,6 +152,22 @@ async function refresh() {
     kpis(k); status(s); placement(p); plan(pl); execution(x); audit(a);
   } catch (err) { document.getElementById("leader").textContent = "API unreachable: " + err; }
 }
+const EXAMPLES = ["How much are we saving?", "Why is web_0/3 on warm?", "Any rollbacks?", "Who is the leader?", "Policy for src1_2?", "Show the plan"];
+async function askCopilot(question) {
+  const box = document.getElementById("answer");
+  box.textContent = "thinking..."; box.className = "muted";
+  try {
+    const r = await fetch("/api/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question }) });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const a = await r.json();
+    box.replaceChildren(el("span", a.source === "llm" ? "LLM, grounded" : "template", "src " + a.source), el("span", a.answer));
+    box.className = "";
+    if (a.source !== "llm" && a.note) box.appendChild(el("div", a.note, "muted"));
+  } catch (err) { box.textContent = "Copilot unavailable: " + err; }
+}
+EXAMPLES.forEach(q => { const b = el("button", q, "chip"); b.type = "button"; b.onclick = () => { document.getElementById("q").value = q; askCopilot(q); }; document.getElementById("chips").appendChild(b); });
+document.getElementById("askForm").addEventListener("submit", e => { e.preventDefault(); const q = document.getElementById("q").value.trim(); if (q) askCopilot(q); });
+get("/api/copilot").then(c => { document.getElementById("llm").textContent = c.provider === "none" ? "· templates (no LLM key)" : `· ${c.provider} ${c.model}`; }).catch(() => {});
 get("/api/scoreboard").then(scoreboard);
 refresh(); setInterval(refresh, 3000);
 </script>

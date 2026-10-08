@@ -11,12 +11,19 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
 
 from ayojna.api.service import Service
+from ayojna.copilot.copilot import ask
+from ayojna.copilot.llm import config_from_env
+
 from ayojna.settings import DATA_DIR, REPO_ROOT
 
 WEB = REPO_ROOT / "web" / "index.html"
 
+
+class Question(BaseModel):
+    question: str = Field(min_length=1, max_length=500)
 
 def create_app(state_dir: str | Path | None = None, lake_dir: str | Path | None = None) -> FastAPI:
     svc = Service(
@@ -61,6 +68,15 @@ def create_app(state_dir: str | Path | None = None, lake_dir: str | Path | None 
     def explain(volume: str, extent_id: int):
         return svc.explain(volume, extent_id)
 
+    @api.post("/api/ask")
+    def ask_copilot(q: Question):
+        return ask(q.question, svc)
+
+    @api.get("/api/copilot")
+    def copilot_info():
+        cfg = config_from_env()
+        return {"provider": cfg.provider, "model": cfg.model if cfg.provider != "none" else None}
+    
     return api
 
 
