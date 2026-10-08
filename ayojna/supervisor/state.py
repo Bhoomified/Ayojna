@@ -7,11 +7,11 @@ Redis later. Every write is atomic (write a temp file, then rename).
 from __future__ import annotations
 
 import json
-import os
 import time
 from pathlib import Path
 
 import pandas as pd
+from ayojna.io import atomic_write_text
 
 
 class StateStore:
@@ -21,14 +21,13 @@ class StateStore:
         self.ttl = lease_ttl_s
 
     # ---------- helpers ----------
+           # ---------- helpers ----------
     def _write(self, name: str, data: dict) -> None:
-        tmp = self.root / f".{name}.{os.getpid()}.tmp"
-        tmp.write_text(json.dumps(data))
-        os.replace(tmp, self.root / name)
+        atomic_write_text(self.root / name, json.dumps(data))
 
     def _read(self, name: str) -> dict | None:
         p = self.root / name
-        return json.loads(p.read_text()) if p.exists() else None
+        return json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
 
     # ---------- leader lease ----------
     def acquire(self, owner: str) -> int | None:

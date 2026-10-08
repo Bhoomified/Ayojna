@@ -1,5 +1,5 @@
 import time
-
+import json
 from ayojna.ingest.build import build
 from ayojna.ingest.synth import generate
 from ayojna.supervisor.pipeline import build_steps
@@ -86,13 +86,47 @@ def test_stale_leader_cannot_run(tmp_path):
     except PermissionError:
         pass
 
-
-def test_real_pipeline_falls_back_without_model(tmp_path):
+def _pipeline(tmp_path, **kw):
     generate(tmp_path / "raw", days=3, seed=4)
     build(tmp_path / "raw", tmp_path / "eh.csv")
     store, token = _store(tmp_path / "state")
-    steps = build_steps(str(tmp_path / "eh.csv"), str(tmp_path / "f.csv"), str(tmp_path / "none"))
+    steps = build_steps(
+        str(tmp_path / "eh.csv"),
+        str(tmp_path / "f.csv"),
+        str(tmp_path / "none"),
+        state_dir=str(tmp_path / "state"),
+        tiers_root=str(tmp_path / "tiers"),
+        **kw,
+    )
+    return store, token, steps
+
+
+def test_real_pipeline_plans_and_executes(tmp_path):
+    store, token, steps = _pipeline(tmp_path)
     r = run_cycle("r1", steps, store, token)
     assert r["level"] == "L1"  # no trained model: rule fallback
     assert r["steps"]["hotness"]["source"] == "fallback"
-    assert r["outputs"]["plan"].envelope.fencing_token == token
+    plan, ex = r["outputs"]["plan"], r["outputs"]["execute"]
+    assert plan.envelope.fencing_token == token and len(plan.moves) > 0
+    assert ex["done"] == len(plan.moves) and ex["rolled_back"] == 0
+    held = [m for m in plan.moves if m.volume == "src1_2"]
+    assert held == []  # legal hold: frozen
+    assert not any(
+        m.volume == "web_0" and m.to_tier.value in ("cold", "archive") for m in plan.moves
+    )
+    saved = json.loads((tmp_path / "state" / "last_plan.json").read_text())
+    assert len(saved["why"]) == len(plan.moves)
+
+
+def test_recommend_only_moves_nothing(tmp_path):
+    store, token, steps = _pipeline(tmp_path, recommend_only=True)
+    r = run_cycle("r1", steps, store, token)
+    assert r["outputs"]["execute"]["mode"] == "recommend-only"
+    cat = json.loads((tmp_path / "state" / "catalog.json").read_text())
+    assert {e["tier"] for e in cat.values()} == {"hot"}
+
+
+def test_broken_planner_holds(tmp_path):
+    store, token, steps = _pipeline(tmp_path, faults={"plan": "fail"})
+    r = run_cycle("r1", steps, store, token)
+    assert r["steps"]["plan"]["source"] == "fallback" and r["outputs"]["plan"].moves == []
