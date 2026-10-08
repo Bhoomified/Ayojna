@@ -4,6 +4,7 @@ Each output row = one extent at one hour, describing its past (features) and,
 for training, its next 24 hours (label). Hours with no I/O are filled with 0,
 because "nothing happened" is exactly what makes data cold.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -17,11 +18,20 @@ from ayojna.settings import CONFIG_DIR
 
 KEYS = ["volume", "extent_id", "hour"]
 FEATURE_COLUMNS = [
-    "acc_1h", "acc_6h", "acc_24h", "acc_72h",
-    "hours_since_access", "trend_24_vs_72", "same_hour_yesterday",
-    "read_ratio_24h", "avg_io_size_24h", "rand_ratio_24h",
-    "hour_of_day", "day_of_week",
+    "acc_1h",
+    "acc_6h",
+    "acc_24h",
+    "acc_72h",
+    "hours_since_access",
+    "trend_24_vs_72",
+    "same_hour_yesterday",
+    "read_ratio_24h",
+    "avg_io_size_24h",
+    "rand_ratio_24h",
+    "hour_of_day",
 ]
+# day_of_week is computed but NOT a model feature: one week of trace means the
+# test day is a weekday the model never saw in training.
 NEVER = 999  # hours_since_access when the extent was never touched
 
 
@@ -81,8 +91,10 @@ def build_features(eh: pd.DataFrame, hot_min: int = 50, horizon: int = 24) -> pd
     df["future_acc"] = future
     df["label"] = np.select(
         [future >= hot_min, future > 0, future == 0],
-        [Tier.HOT.value, Tier.WARM.value, Tier.COLD.value], default=None)
-    return df[KEYS + FEATURE_COLUMNS + ["future_acc", "label"]]
+        [Tier.HOT.value, Tier.WARM.value, Tier.COLD.value],
+        default=None,
+    )
+    return df[KEYS + FEATURE_COLUMNS + ["day_of_week", "future_acc", "label"]]
 
 
 def time_split(features: pd.DataFrame, test_hours: int, horizon: int = 24):
@@ -90,7 +102,9 @@ def time_split(features: pd.DataFrame, test_hours: int, horizon: int = 24):
     labelled = features[features["label"].notna()]
     last = int(labelled["hour"].max())
     test_start = last - test_hours + 1
-    train = labelled[labelled["hour"] + horizon <= test_start - 1]   # train labels end before test begins
+    train = labelled[
+        labelled["hour"] + horizon <= test_start - 1
+    ]  # train labels end before test begins
     test = labelled[labelled["hour"] >= test_start]
     if train.empty or test.empty:
         raise ValueError("not enough hours for a train/test split: replay more days of trace")
