@@ -1,0 +1,7 @@
+# Compliance rules, applied BEFORE the optimizer. Tier order: hot, warm, cold, archive.
+legal_hold_freezes: true          # data under legal hold never moves
+no_archive_classes: [financial, pii]  # must stay quickly retrievable for audits and data requests
+sla_floor:                        # slowest tier allowed for each SLA class
+  oltp: warm
+  general: cold
+  backup: archive
