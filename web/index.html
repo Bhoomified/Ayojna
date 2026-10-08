@@ -160,7 +160,7 @@ async function askCopilot(question) {
     const r = await fetch("/api/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question }) });
     if (!r.ok) throw new Error("HTTP " + r.status);
     const a = await r.json();
-    box.replaceChildren(el("span", a.source === "llm" ? "LLM, grounded" : "template", "src " + a.source), el("span", a.answer));
+    box.replaceChildren(el("span", a.source === "llm" ? `${a.provider || "LLM"}, grounded` : "template", "src " + a.source), el("span", a.answer));
     box.className = "";
     if (a.source !== "llm" && a.note) box.appendChild(el("div", a.note, "muted"));
   } catch (err) { box.textContent = "Copilot unavailable: " + err; }

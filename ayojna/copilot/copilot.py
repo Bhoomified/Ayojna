@@ -190,8 +190,10 @@ def ask(question: str, svc: Service, llm: Callable[[str, str], str] = complete) 
     if bad:
         note = f"LLM answer rejected by grounding guard: unsupported numbers {bad[:5]}"
         return {**result, "answer": fallback, "source": "template", "note": note}
-    return {**result, "answer": answer, "source": "llm", "note": "grounding check passed"}
 
+    provider = getattr(answer, "provider", "") or "llm"
+    note = f"{provider}: grounding check passed"
+    return {**result, "answer": str(answer), "source": "llm", "provider": provider, "note": note}
 
 if __name__ == "__main__":
     q = " ".join(sys.argv[1:]) or "how much are we saving?"
