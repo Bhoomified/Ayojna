@@ -9,5 +9,9 @@ scikit-learn>=1.4
 lightgbm>=4.3
 # Executor (Bhoomi): only needed for --store-kind minio
 minio>=7.2
+# API + dashboard (Vaishnavi)
+fastapi>=0.110
+uvicorn>=0.29
+httpx>=0.27
 # Dev
 pytest>=8
