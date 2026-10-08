@@ -1,0 +1,15 @@
+# Digital twin settings. Tier prices and base latency live in tiers.yaml.
+hours_per_month: 730
+max_utilization: 0.95          # queueing model is capped here so latency stays finite
+tier_ios_per_hour:             # I/Os per hour a tier can serve before queueing builds up
+  hot: 20000000
+  warm: 5000000
+  cold: 200000
+  archive: 1000
+initial_tier: hot              # where every extent starts (the "before Ayojna" world)
+strategies:
+  age_rule:                    # inactivity timer, scaled to a week-long trace
+    warm_after_idle_hours: 24
+    cold_after_idle_hours: 72
+  access_timer:                # cloud-style auto-tiering: hot <-> warm on an idle timer
+    idle_hours: 24
