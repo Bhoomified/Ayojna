@@ -1,0 +1,7 @@
+# Ayojna planner settings
+horizon_hours: 24          # each decision is priced over the next 24 hours
+sla_penalty_per_io: 0.0005 # $ charged per I/O expected to miss its latency target
+hysteresis_usd: 0.0005     # a move must save at least this much (before amortizing)
+move_amortization_hours: 168  # a move is paid back over a week of expected residency
+abstain_below: 0.6         # below this confidence the extent stays where it is
+max_gb_moved_per_hour: 50  # migration budget
