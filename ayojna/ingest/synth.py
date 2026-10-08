@@ -10,6 +10,7 @@ Timestamp and ResponseTime are Windows filetime units (100 ns ticks).
 
 Run:  python -m ayojna.ingest.synth --days 3 --out data/raw/synth
 """
+
 from __future__ import annotations
 
 import argparse
@@ -27,13 +28,13 @@ TRACE_START_TICKS = 128_166_372_000_000_000  # Feb 2007, like the real MSR trace
 
 @dataclass(frozen=True)
 class VolumeProfile:
-    name: str            # MSR style: host_disk, e.g. "web_0"
+    name: str  # MSR style: host_disk, e.g. "web_0"
     n_extents: int
     ios_per_hour: float  # average at the daily peak
     write_share: float
-    seq_share: float     # share of I/Os that are sequential runs
+    seq_share: float  # share of I/Os that are sequential runs
     io_kb: int
-    pattern: str         # "office", "nightly", "steady", "late_spike"
+    pattern: str  # "office", "nightly", "steady", "late_spike"
 
 
 PROFILES = [
@@ -59,13 +60,16 @@ def _hour_factor(pattern: str, hour: int, n_hours: int) -> float:
 
 
 def _extent_weights(n: int, rng: np.random.Generator) -> np.ndarray:
-    """~5% hot, ~15% warm, the rest a long cold tail (many never touched)."""
-    w = np.full(n, 0.002)
+    """~5% hot, ~15% warm, ~30% rarely touched, ~50% never touched.
+
+    Mirrors real enterprise data: a small busy core and a long, mostly idle tail.
+    """
+    w = np.zeros(n)
     order = rng.permutation(n)
-    n_hot, n_warm = max(1, n // 20), max(1, n * 3 // 20)
+    n_hot, n_warm, n_rare = max(1, n // 20), max(1, n * 3 // 20), max(1, n * 3 // 10)
     w[order[:n_hot]] = 1.0
-    w[order[n_hot:n_hot + n_warm]] = 0.08
-    w[order[n_hot + n_warm:][: n // 2]] = 0.0  # half the tail is never touched
+    w[order[n_hot : n_hot + n_warm]] = 0.02
+    w[order[n_hot + n_warm : n_hot + n_warm + n_rare]] = 0.0002
     return w / w.sum()
 
 
@@ -88,15 +92,19 @@ def generate_volume(p: VolumeProfile, days: int, rng: np.random.Generator) -> pd
             if i > 0:
                 offsets[i] = offsets[i - 1] + io_bytes
         secs = np.sort(rng.uniform(0, 3600, size=n)) + hour * 3600
-        rows.append(pd.DataFrame({
-            "Timestamp": TRACE_START_TICKS + (secs * TICKS_PER_SECOND).astype(np.int64),
-            "Hostname": host,
-            "DiskNumber": int(disk),
-            "Type": np.where(rng.random(n) < p.write_share, "Write", "Read"),
-            "Offset": offsets,
-            "Size": io_bytes,
-            "ResponseTime": rng.lognormal(mean=9.0, sigma=0.6, size=n).astype(np.int64),
-        }))
+        rows.append(
+            pd.DataFrame(
+                {
+                    "Timestamp": TRACE_START_TICKS + (secs * TICKS_PER_SECOND).astype(np.int64),
+                    "Hostname": host,
+                    "DiskNumber": int(disk),
+                    "Type": np.where(rng.random(n) < p.write_share, "Write", "Read"),
+                    "Offset": offsets,
+                    "Size": io_bytes,
+                    "ResponseTime": rng.lognormal(mean=9.0, sigma=0.6, size=n).astype(np.int64),
+                }
+            )
+        )
     return pd.concat(rows, ignore_index=True)
 
 
