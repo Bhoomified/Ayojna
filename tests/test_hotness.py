@@ -71,3 +71,15 @@ def test_predictor_uses_promoted_model(split, tmp_path):
     (store / LATEST).write_text(json.dumps({"file": path.name}))
     _, source, status, note = predict_hotness(te.head(300), store=store)
     assert source == Source.PRIMARY and status == Status.OK and note.startswith("model")
+
+
+
+def test_predictions_carry_signed_feature_drivers(split):
+    import json
+
+    train_df, test_df = split
+    model = train(train_df)
+    pred = model.predict(test_df.head(50))
+    drivers = [json.loads(d) for d in pred["drivers"]]
+    assert any(drivers) and all(len(d) <= 5 for d in drivers)
+    assert all({"feature", "value", "effect"} <= set(x) for d in drivers for x in d)

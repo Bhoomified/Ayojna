@@ -71,3 +71,13 @@ def test_ledger_has_idempotency_keys(tmp_path):
     ex.execute(_plan(), lambda t: True)
     keys = [json.loads(x)["key"] for x in (tmp_path / "ledger.jsonl").read_text().splitlines()]
     assert keys == ["r1:web_0:1:warm", "r1:web_0:2:warm"]
+
+
+
+def test_only_approved_moves_run_in_approval_mode(tmp_path):
+    store, cat, ex = _setup(tmp_path)
+    verdicts = {1: "approved", 2: "rejected"}
+    r = ex.execute(_plan(), lambda t: True, decide=lambda m: verdicts[m.extent_id])
+    assert r["done"] == 1 and r["rejected"] == 1 and cat.tier_of(object_key("web_0", 2)) == "hot"
+    r = ex.execute(_plan(), lambda t: True, decide=lambda m: "pending")
+    assert r["pending"] == 2

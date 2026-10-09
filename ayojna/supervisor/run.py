@@ -43,6 +43,7 @@ def main(a) -> None:
         recommend_only=a.recommend_only,
         corrupt_first_move=a.corrupt_move,
         crash_after_moves=a.crash_after_moves,
+        approval_mode=a.approval,
     )
     if a.crash_after:  # crash right after this step's checkpoint is saved
         i = [s.name for s in steps].index(a.crash_after)
@@ -74,11 +75,10 @@ def main(a) -> None:
         if "plan" in out:
             p = out["plan"]
             print(f"    plan: {len(p.moves)} moves, {p.total_gb:.1f} GB ({p.strategy})")
-        if ex.get("mode") == "executed":
+        if ex.get("mode") in ("executed", "approval"):
             print(
-                f"    execute: done {ex['done']}, skipped {ex['skipped']}, "
-                f"rolled back {ex['rolled_back']}, {ex['gb_moved']} GB moved"
-                + (" | FENCED: stopped, a newer leader exists" if ex["fenced"] else "")
+                f"    execute: done {ex['done']}, pending approval {ex['pending']}, "
+                f"rejected {ex['rejected']}, skipped {ex['skipped']}, "
             )
         store.audit(
             {
@@ -112,6 +112,7 @@ if __name__ == "__main__":
     ap.add_argument("--tiers", default="data/tiers")
     ap.add_argument("--store-kind", choices=["fs", "minio"], default="fs")
     ap.add_argument("--recommend-only", action="store_true")
+    ap.add_argument("--approval", action="store_true", help="execute only approved groups")
     ap.add_argument("--corrupt-move", action="store_true")
     ap.add_argument("--crash-after-moves", type=int)
     ap.add_argument("--fail")

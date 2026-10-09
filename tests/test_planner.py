@@ -105,3 +105,17 @@ def test_busy_tier_is_relieved_before_queueing_breaks_the_sla():
     cfg = {**CFG, "queue_headroom": 0.7}  # cold may carry 0.2 x 300 x 0.7 = 42 I/Os per hour
     choice = _plan([30, 30, 30], [2, 2, 2], allowed=allowed, sla=10.0, eco=eco, cfg=cfg)
     assert (choice == 2).sum() == 1 and (choice < 2).sum() == 2  # two busiest promoted
+
+
+
+def test_queue_relief_never_overfills_a_faster_tier():
+    from dataclasses import replace
+
+    allowed = np.ones((4, 4), bool)
+    allowed[:, 3] = False
+    eco = replace(
+        ECO, capacity=np.array([1, 1, 10, 10]), ios_capacity=np.array([1e9, 1e9, 100.0, 10.0])
+    )
+    cfg = {**CFG, "queue_headroom": 0.7}  # cold may carry only 14 I/Os per hour
+    choice = _plan([30, 30, 30, 30], [2, 2, 2, 2], allowed=allowed, sla=10.0, eco=eco, cfg=cfg)
+    assert (choice == 0).sum() <= 1 and (choice == 1).sum() <= 1  # room for one each

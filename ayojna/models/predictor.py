@@ -58,4 +58,5 @@ def predict_hotness(
         pred["confidence"] = rule[["p_hot", "p_warm", "p_cold"]].max(axis=1)
         pred["abstain"] = pred["confidence"] < ABSTAIN_BELOW
         pred["reasons"] = "rule fallback: recency and activity thresholds"
+        pred["drivers"] = "[]"
         return pred, Source.FALLBACK, Status.DEGRADED, f"fallback ({type(exc).__name__}: {exc})"

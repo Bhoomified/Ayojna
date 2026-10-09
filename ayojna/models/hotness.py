@@ -68,39 +68,63 @@ class HotnessModel:
         out["pred"] = np.array(CLASSES)[idx]
         out["confidence"] = p.max(axis=1)
         out["abstain"] = out["confidence"] < ABSTAIN_BELOW
-        out["reasons"] = self.reasons(df, p, idx) if with_reasons else ""
+        if with_reasons:
+            out["reasons"], out["drivers"] = self.explain(df, p, idx)
+        else:
+            out["reasons"], out["drivers"] = "", "[]"
         return out
 
-    def reasons(
+    def explain(
         self, df: pd.DataFrame, p: np.ndarray, idx: np.ndarray, top_k: int = 3
-    ) -> list[str]:
-        """Top features that most support each prediction (feature ablation)."""
+    ) -> tuple[list[str], list[str]]:
+        """Per-prediction explanation by occlusion (a local, SHAP-style attribution).
+
+        effect of a feature = confidence in the predicted class minus the confidence when that
+        feature alone is set to its typical (median) training value. Positive = pushed toward
+        the prediction, negative = pushed against it. Returns (reasons text, drivers JSON).
+        """
         x = df[self.features].to_numpy(dtype=float)
         rows = np.arange(len(x))
         base = p[rows, idx]
-        drops = np.zeros((len(x), len(self.features)))
+        order = [list(self.estimator.classes_).index(c) for c in CLASSES]
+        effect = np.zeros((len(x), len(self.features)))
         for j, name in enumerate(self.features):
             xj = x.copy()
             xj[:, j] = self.typical[name]
-            pj = self.estimator.predict_proba(xj)
-            order = [list(self.estimator.classes_).index(c) for c in CLASSES]
-            drops[:, j] = base - pj[:, order][rows, idx]
-        # how unusual each value is versus training data (used when no single feature dominates)
+            effect[:, j] = base - self.estimator.predict_proba(xj)[:, order][rows, idx]
         typical = np.array([self.typical[f] for f in self.features])
         spread = np.array([self.spread[f] for f in self.features])
         unusual = np.abs(x - typical) / spread
-        out = []
+        reasons, drivers = [], []
         for i in rows:
-            best = [j for j in np.argsort(-drops[i])[:top_k] if drops[i, j] > 0.01]
+            best = [j for j in np.argsort(-effect[i])[:top_k] if effect[i, j] > 0.01]
             if not best:  # several features agree, none decisive alone: name the most unusual ones
                 best = [j for j in np.argsort(-unusual[i])[:2] if unusual[i, j] > 0]
-            out.append(
+            reasons.append(
                 "; ".join(
                     f"{READABLE.get(self.features[j], self.features[j])} = {x[i, j]:g}"
                     for j in best
                 )
             )
-        return out
+            top = np.argsort(-np.abs(effect[i]))[:5]
+            drivers.append(
+                json.dumps(
+                    [
+                        {
+                            "feature": READABLE.get(self.features[j], self.features[j]),
+                            "value": round(float(x[i, j]), 3),
+                            "effect": round(float(effect[i, j]), 3),
+                        }
+                        for j in top
+                        if abs(effect[i, j]) >= 0.005
+                    ]
+                )
+            )
+        return reasons, drivers
+
+    def reasons(self, df: pd.DataFrame, p: np.ndarray, idx: np.ndarray, top_k: int = 3):
+        """Readable top reasons only (kept for callers that do not need drivers)."""
+        return self.explain(df, p, idx, top_k)[0]
 
     # ---------- persistence ----------
     def save(self, folder: str | Path) -> Path:

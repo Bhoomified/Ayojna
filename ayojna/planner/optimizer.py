@@ -3,8 +3,9 @@
 Expected cost of extent i on tier t over the next H hours:
     storage + expected retrieval + expected SLA misses x penalty
     + (move cost + early-deletion fee, only if t changes)
-Then: capacity limits on hot and warm (demote the extents that lose least), and a
-migration budget (keep the moves with the biggest benefit).
+Then: capacity limits on hot and warm (demote the extents that lose least), queue relief
+(keep each tier's load inside its SLA, without overfilling faster tiers or churning), and
+a migration budget (keep the moves with the biggest benefit).
 """
 
 from __future__ import annotations
@@ -51,12 +52,47 @@ class TierEconomics:
         )
 
 
-def _queue_repair(choice, cost, expected_ios, sla_ms, eco, headroom) -> None:
+def cost_breakdown(
+    expected_ios: np.ndarray,
+    read_gb_per_io: np.ndarray,
+    sla_ms: np.ndarray,
+    current: np.ndarray,
+    held_hours: np.ndarray,
+    eco: TierEconomics,
+    cfg: dict,
+) -> dict[str, np.ndarray]:
+    """Expected cost of each extent on each tier over the horizon, split by cause ($).
+
+    storage, retrieval, sla_risk and move are (n, 4); move is 0 on the current tier and is
+    the one-time move cost + early-deletion fee + hysteresis, amortized over the expected stay.
+    move_once (n,) is the un-amortized one-time cost, used for the payback time.
+    """
+    H = cfg["horizon_hours"]
+    ios_h = (expected_ios * H)[:, None]
+    remaining = np.clip(eco.min_hours[current] - held_hours, 0, None)
+    leave_fee = GB * eco.price[current] * remaining / eco.hours_per_month
+    move_once = GB * eco.move_cost_per_gb + leave_fee
+    move = np.repeat(
+        ((move_once + cfg["hysteresis_usd"]) * H / cfg["move_amortization_hours"])[:, None], 4, 1
+    )
+    move[np.arange(len(current)), current] = 0.0  # staying costs no move
+    return {
+        "storage": np.repeat((GB * eco.price * H / eco.hours_per_month)[None, :], len(current), 0),
+        "retrieval": ios_h * read_gb_per_io[:, None] * eco.retrieval[None, :],
+        "sla_risk": ios_h * (eco.latency_ms[None, :] > sla_ms[:, None]) * cfg["sla_penalty_per_io"],
+        "move": move,
+        "move_once": move_once,
+    }
+
+
+def _queue_repair(choice, cost, expected_ios, sla_ms, current, eco, headroom) -> None:
     """Keep each tier's expected load low enough that queueing stays inside the SLA.
 
     Latency on a tier = base / (1 - utilisation). For the strictest extent placed there,
-    utilisation may reach 1 - base / sla. Above that (times a safety headroom), the busiest
-    extents are promoted to their cheapest allowed faster tier. Cold first, then warm.
+    utilisation may reach 1 - base / sla. Above that (times a safety headroom), extents are
+    promoted to the cheapest faster tier that is allowed AND still has room, busiest first.
+    Extents already sitting on a faster tier are preferred (keeping them costs no move), so
+    the plan does not churn from hour to hour. Cold first, then warm.
     """
     for t in (2, 1):
         on_t = np.flatnonzero(choice == t)
@@ -64,16 +100,19 @@ def _queue_repair(choice, cost, expected_ios, sla_ms, eco, headroom) -> None:
             continue
         u_max = 1.0 - eco.latency_ms[t] / sla_ms[on_t].min()
         cap = max(0.0, u_max) * eco.ios_capacity[t] * headroom
-        load = expected_ios[on_t]
-        if load.sum() <= cap:
+        load = expected_ios[on_t].sum()
+        if load <= cap:
             continue
-        order = on_t[np.argsort(-load, kind="stable")]  # busiest first
-        remaining = load.sum() - np.cumsum(expected_ios[order])
-        k = int(np.argmax(remaining <= cap)) + 1 if (remaining <= cap).any() else len(order)
-        promote = order[:k]
-        faster = cost[promote][:, :t]
-        ok = np.isfinite(faster.min(axis=1))
-        choice[promote[ok]] = faster[ok].argmin(axis=1)
+        sticky = np.where(current[on_t] < t, 2.0, 1.0)  # already faster: cheaper to keep
+        room = eco.capacity[:t] - np.bincount(choice, minlength=4)[:t]
+        for i in on_t[np.argsort(-expected_ios[on_t] * sticky, kind="stable")]:
+            if load <= cap:
+                break
+            options = [u for u in range(t) if room[u] > 0 and np.isfinite(cost[i, u])]
+            if not options:
+                continue
+            u = min(options, key=lambda k: cost[i, k])
+            choice[i], room[u], load = u, room[u] - 1, load - expected_ios[i]
 
 
 def plan(
@@ -87,23 +126,10 @@ def plan(
     eco: TierEconomics,
     cfg: dict,
 ) -> np.ndarray:
-    n, H = len(current), cfg["horizon_hours"]
+    n = len(current)
     rows = np.arange(n)
-    ios_h = (expected_ios * H)[:, None]
-    cost = (
-        GB * eco.price[None, :] * H / eco.hours_per_month
-        + ios_h * read_gb_per_io[:, None] * eco.retrieval[None, :]
-        + ios_h * (eco.latency_ms[None, :] > sla_ms[:, None]) * cfg["sla_penalty_per_io"]
-    )
-    remaining = np.clip(eco.min_hours[current] - held_hours, 0, None)
-    leave_fee = GB * eco.price[current] * remaining / eco.hours_per_month
-    move = (
-        (GB * eco.move_cost_per_gb + leave_fee + cfg["hysteresis_usd"])
-        * H
-        / cfg["move_amortization_hours"]
-    )
-    cost = cost + move[:, None]
-    cost[rows, current] -= move  # staying costs no move
+    parts = cost_breakdown(expected_ios, read_gb_per_io, sla_ms, current, held_hours, eco, cfg)
+    cost = parts["storage"] + parts["retrieval"] + parts["sla_risk"] + parts["move"]
 
     ok = allowed.copy()
     stay_ok = ok[rows, current]
@@ -124,7 +150,9 @@ def plan(
         order = on_t[movable][np.argsort(regret[movable])][:excess]
         choice[order] = t + 1 + cost[order][:, t + 1 :].argmin(axis=1)
     if eco.ios_capacity is not None:
-        _queue_repair(choice, cost, expected_ios, sla_ms, eco, cfg.get("queue_headroom", 0.7))
+        _queue_repair(
+            choice, cost, expected_ios, sla_ms, current, eco, cfg.get("queue_headroom", 0.7)
+        )
     moving = np.flatnonzero(choice != current)
     budget = int(cfg["max_gb_moved_per_hour"] / GB)
     if len(moving) > budget:

@@ -23,6 +23,7 @@ from ayojna.models.features import build_features, load_label_config
 from ayojna.models.predictor import predict_hotness
 from ayojna.planner.live import live_plan
 from ayojna.planner.optimizer import load_planner_config
+from ayojna.recommend.approvals import decision_for, load_approvals
 from ayojna.settings import CONFIG_DIR
 from ayojna.supervisor.runner import Degraded, Step
 from ayojna.supervisor.state import StateStore
@@ -63,6 +64,7 @@ def build_steps(
     recommend_only: bool = False,
     corrupt_first_move: bool = False,
     crash_after_moves: int | None = None,
+    approval_mode: bool = False,
 ) -> list[Step]:
     faults = faults or {}
     labels = load_label_config()["labels"]
@@ -105,8 +107,11 @@ def build_steps(
         catalog = Catalog(catalog_path)
         catalog.seed(twin.volumes, twin.extent_ids, make_store(store_kind, tiers_root), hour)
         current, since = catalog.placement(twin.volumes, twin.extent_ids)
-        mp, why = live_plan(twin, preds, ctx["features"], current, since, envelope(ctx))
-        _write_json(state.root / "last_plan.json", {"plan": mp.model_dump(mode="json"), "why": why})
+        mp, why, cards = live_plan(twin, preds, ctx["features"], current, since, envelope(ctx))
+        _write_json(
+            state.root / "last_plan.json",
+            {"plan": mp.model_dump(mode="json"), "why": why, "cards": cards},
+        )
         return mp
 
     def plan_fallback(ctx):  # hold: no moves is always safe
@@ -131,7 +136,12 @@ def build_steps(
                 corrupt_first=corrupt_first_move,
                 crash_after_moves=crash_after_moves,
             )
-            report = ex.execute(mp, state.is_current)
+            decide = None
+            if approval_mode:  # only groups a person approved are executed
+                approvals = load_approvals(state.root)
+                decide = lambda m: decision_for(approvals, m.group_key())  # noqa: E731
+            report = ex.execute(mp, state.is_current, decide)
+            report["mode"] = "approval" if approval_mode else "executed"
         _write_json(state.root / "last_exec.json", report)
         return report
 

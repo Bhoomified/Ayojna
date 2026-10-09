@@ -107,6 +107,10 @@ class Move(BaseModel):
 
     def idempotency_key(self, run_id: str) -> str:
         return f"{run_id}:{self.volume}:{self.extent_id}:{self.to_tier.value}"
+    
+    def group_key(self) -> str:
+        """Recommendations are grouped (and approved) per volume and direction."""
+        return f"{self.volume}:{self.from_tier.value}>{self.to_tier.value}"
 
 
 class MovePlan(BaseModel):

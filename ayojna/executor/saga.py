@@ -19,9 +19,10 @@ import time
 from pathlib import Path
 from typing import Callable
 
-from ayojna.contracts import MovePlan
+from ayojna.contracts import Move, MovePlan
 from ayojna.executor.catalog import Catalog
 from ayojna.executor.tierstore import object_key
+from ayojna.planner.optimizer import plan
 
 
 def _sha(data: bytes) -> str:
@@ -55,10 +56,17 @@ class Executor:
         with open(self.ledger, "a", encoding="utf-8") as f:
             f.write(json.dumps({"ts": time.time(), "key": key}) + "\n")
 
-    def execute(self, plan: MovePlan, is_current: Callable[[int], bool]) -> dict:
+    def execute(
+        self,
+        plan: MovePlan,
+        is_current: Callable[[int], bool],
+        decide: Callable[[Move], str] | None = None,
+    ) -> dict:
+        """decide(move) -> approved / rejected / pending (human-in-the-loop mode); None = all."""
         run_id, token = plan.envelope.run_id, plan.envelope.fencing_token
         done = self._done_keys()
         counts = {"done": 0, "skipped": 0, "rolled_back": 0, "over_budget": 0, "stale": 0}
+        counts.update(pending=0, rejected=0)
         results, used_gb, fenced, applied = [], 0.0, False, 0
         for m in plan.moves:
             if not is_current(token):
@@ -68,7 +76,11 @@ class Executor:
             obj = object_key(m.volume, m.extent_id)
             src, dst = m.from_tier.value, m.to_tier.value
             status, note = "done", ""
-            if idem in done or self.catalog.tier_of(obj) == dst:
+            verdict = decide(m) if decide else "approved"
+            if verdict != "approved":
+                status = "rejected" if verdict == "rejected" else "pending"
+                note = "rejected by an operator" if status == "rejected" else "awaiting approval"
+            elif idem in done or self.catalog.tier_of(obj) == dst:
                 status, note = "skipped", "already applied (idempotent replay)"
                 if self.store.exists(dst, obj):
                     self.store.delete(src, obj)  # finish a clean-up a crash may have missed
