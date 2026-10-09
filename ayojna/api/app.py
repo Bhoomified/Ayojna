@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
@@ -24,6 +25,13 @@ WEB = REPO_ROOT / "web" / "index.html"
 
 class Question(BaseModel):
     question: str = Field(min_length=1, max_length=500)
+
+
+
+class Decision(BaseModel):
+    group: str = Field(min_length=3, max_length=80)
+    decision: Literal["approved", "rejected"]
+    note: str = Field(default="", max_length=200)
 
 def create_app(state_dir: str | Path | None = None, lake_dir: str | Path | None = None) -> FastAPI:
     svc = Service(
@@ -68,6 +76,18 @@ def create_app(state_dir: str | Path | None = None, lake_dir: str | Path | None 
     def explain(volume: str, extent_id: int):
         return svc.explain(volume, extent_id)
 
+    @api.get("/api/recommendations")
+    def recommendations():
+        return svc.recommendations()
+
+    @api.get("/api/recommendations/detail")
+    def recommendation(group: str):
+        return svc.recommendation(group)
+
+    @api.post("/api/recommendations/decide")
+    def decide(d: Decision):
+        return svc.decide(d.group, d.decision, d.note)
+    
     @api.post("/api/ask")
     def ask_copilot(q: Question):
         return ask(q.question, svc)

@@ -18,6 +18,8 @@ import numpy as np
 
 from ayojna.contracts import EXTENT_MB, TIER_ORDER
 from ayojna.policy.guard import allowed_tiers
+from ayojna.recommend import engine
+from ayojna.recommend.approvals import load_approvals, set_decision
 from ayojna.settings import load_config
 
 GB = EXTENT_MB / 1024
@@ -173,3 +175,19 @@ class Service:
             "level": cycle["level"] if cycle else None,
             "moves_last_cycle": cycle["moves_done"] if cycle else None,
         }
+    
+    # ---------- recommendation engine ----------
+    def recommendations(self) -> dict:
+        saved = _json(self.state / "last_plan.json")
+        if not saved:
+            return {"available": False}
+        return engine.build(saved, _json(self.state / "last_exec.json"), load_approvals(self.state))
+
+    def recommendation(self, group: str) -> dict:
+        saved = _json(self.state / "last_plan.json")
+        found = engine.detail(saved, group) if saved else None
+        return {"available": True, **found} if found else {"available": False}
+
+    def decide(self, group: str, decision: str, note: str = "") -> dict:
+        """The only write the API makes: a human decision, never data."""
+        return {"group": group, **set_decision(self.state, group, decision, note)}
