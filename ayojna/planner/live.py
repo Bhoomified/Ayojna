@@ -48,15 +48,7 @@ def live_plan(
     hour = int(preds["hour"].max())
     exp, rgb, conf, why = expected_load(twin, preds, feats, cfg["abstain_below"])
     allowed, policy = allowed_tiers(twin.volumes, current)
-    eco = TierEconomics(
-        twin.price,
-        twin.retrieval,
-        twin.min_hours,
-        twin.base_latency,
-        twin.capacity_extents,
-        twin.move_cost_per_gb,
-        twin.hours_per_month,
-    )
+    eco = TierEconomics.from_twin(twin)
     choice = plan(exp, rgb, twin.sla_target_ms, current, hour - since, allowed, conf, eco, cfg)
     moves, notes = [], {}
     for i in np.flatnonzero(choice != current):

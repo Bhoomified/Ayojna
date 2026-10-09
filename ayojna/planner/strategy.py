@@ -38,15 +38,7 @@ class AyojnaStrategy:
         self.exp_ios[h, c] = lam
         self.read_gb[h, c] = df["avg_io_size_24h"] * df["read_ratio_24h"] / 1e9
         self.conf[h, c] = df["confidence"] >= self.cfg["abstain_below"]
-        self.eco = TierEconomics(
-            twin.price,
-            twin.retrieval,
-            twin.min_hours,
-            twin.base_latency,
-            twin.capacity_extents,
-            twin.move_cost_per_gb,
-            twin.hours_per_month,
-        )
+        self.eco = TierEconomics.from_twin(twin)
         self.since = np.zeros(N)
 
     def decide(self, view: TwinView) -> np.ndarray:

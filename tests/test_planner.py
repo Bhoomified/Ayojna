@@ -93,3 +93,15 @@ def test_ayojna_beats_baselines_and_stays_compliant(tmp_path):
     assert s.loc["ayojna", "compliance_pct"] == pytest.approx(100)
     assert s.loc["ayojna", "hours_over_hot_capacity"] == 0
     assert s.loc["ayojna", "sla_met_pct"] >= 99
+
+def test_busy_tier_is_relieved_before_queueing_breaks_the_sla():
+    from dataclasses import replace
+
+    allowed = np.ones((3, 4), bool)
+    allowed[:, 3] = False  # no archive
+    plain = _plan([30, 30, 30], [2, 2, 2], allowed=allowed, sla=10.0)
+    assert plain.tolist() == [2, 2, 2]  # base latency alone: cold (8 ms) looks fine
+    eco = replace(ECO, ios_capacity=np.array([1e9, 1e9, 300.0, 10.0]))
+    cfg = {**CFG, "queue_headroom": 0.7}  # cold may carry 0.2 x 300 x 0.7 = 42 I/Os per hour
+    choice = _plan([30, 30, 30], [2, 2, 2], allowed=allowed, sla=10.0, eco=eco, cfg=cfg)
+    assert (choice == 2).sum() == 1 and (choice < 2).sum() == 2  # two busiest promoted

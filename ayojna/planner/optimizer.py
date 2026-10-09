@@ -35,6 +35,45 @@ class TierEconomics:
     capacity: np.ndarray  # max extents, per tier
     move_cost_per_gb: float
     hours_per_month: float
+    ios_capacity: np.ndarray | None = None  # I/Os per hour per tier before queues build up
+
+    @classmethod
+    def from_twin(cls, twin) -> "TierEconomics":
+        return cls(
+            twin.price,
+            twin.retrieval,
+            twin.min_hours,
+            twin.base_latency,
+            twin.capacity_extents,
+            twin.move_cost_per_gb,
+            twin.hours_per_month,
+            twin.ios_capacity,
+        )
+
+
+def _queue_repair(choice, cost, expected_ios, sla_ms, eco, headroom) -> None:
+    """Keep each tier's expected load low enough that queueing stays inside the SLA.
+
+    Latency on a tier = base / (1 - utilisation). For the strictest extent placed there,
+    utilisation may reach 1 - base / sla. Above that (times a safety headroom), the busiest
+    extents are promoted to their cheapest allowed faster tier. Cold first, then warm.
+    """
+    for t in (2, 1):
+        on_t = np.flatnonzero(choice == t)
+        if len(on_t) == 0:
+            continue
+        u_max = 1.0 - eco.latency_ms[t] / sla_ms[on_t].min()
+        cap = max(0.0, u_max) * eco.ios_capacity[t] * headroom
+        load = expected_ios[on_t]
+        if load.sum() <= cap:
+            continue
+        order = on_t[np.argsort(-load, kind="stable")]  # busiest first
+        remaining = load.sum() - np.cumsum(expected_ios[order])
+        k = int(np.argmax(remaining <= cap)) + 1 if (remaining <= cap).any() else len(order)
+        promote = order[:k]
+        faster = cost[promote][:, :t]
+        ok = np.isfinite(faster.min(axis=1))
+        choice[promote[ok]] = faster[ok].argmin(axis=1)
 
 
 def plan(
@@ -84,7 +123,8 @@ def plan(
         movable = np.isfinite(alt)
         order = on_t[movable][np.argsort(regret[movable])][:excess]
         choice[order] = t + 1 + cost[order][:, t + 1 :].argmin(axis=1)
-
+    if eco.ios_capacity is not None:
+        _queue_repair(choice, cost, expected_ios, sla_ms, eco, cfg.get("queue_headroom", 0.7))
     moving = np.flatnonzero(choice != current)
     budget = int(cfg["max_gb_moved_per_hour"] / GB)
     if len(moving) > budget:

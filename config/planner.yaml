@@ -5,3 +5,4 @@ hysteresis_usd: 0.0005     # a move must save at least this much (before amortiz
 move_amortization_hours: 168  # a move is paid back over a week of expected residency
 abstain_below: 0.6         # below this confidence the extent stays where it is
 max_gb_moved_per_hour: 50  # migration budget
+queue_headroom: 0.7        # keep each tier's expected load under 70% of its SLA-safe limit
