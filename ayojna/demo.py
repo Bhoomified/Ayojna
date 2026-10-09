@@ -43,13 +43,15 @@ def results_table() -> str:
     lines = [
         f"Scored on unseen hours {h0}-{h1}; predictions: {board['predictions']}",
         "",
-        "| Strategy | $/month | Saving vs all-hot | SLA met | Compliance | GB moved |",
-        "|---|---:|---:|---:|---:|---:|",
+        "| Strategy | $/month | Saving vs all-hot | SLA met | Compliance | GB moved "
+        "| Over hot cap (h) |",
+        "|---|---:|---:|---:|---:|---:|---:|",
     ]
     for r in board["summary"]:
         lines.append(
             f"| {r['strategy']} | {r['monthly_cost']:.3f} | {r['saving_vs_all_hot_pct']:.1f}% "
-            f"| {r['sla_met_pct']:.2f}% | {r['compliance_pct']:.1f}% | {r['gb_moved']:.2f} |"
+            f"| {r['sla_met_pct']:.2f}% | {r['compliance_pct']:.1f}% | {r['gb_moved']:.2f} "
+            f"| {int(r['hours_over_hot_capacity'])} |"
         )
     return "\n".join(lines)
 
