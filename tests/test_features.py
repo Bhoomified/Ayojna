@@ -1,5 +1,4 @@
 import pandas as pd
-import pytest
 
 from ayojna.models.baseline import evaluate, predict_rule
 from ayojna.models.features import FEATURE_COLUMNS, NEVER, build_features, time_split

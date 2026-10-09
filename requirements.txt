@@ -6,7 +6,6 @@ pydantic>=2.7
 pyyaml>=6
 # ML (Vaishnavi)
 scikit-learn>=1.4
-lightgbm>=4.3
 # Executor (Bhoomi): only needed for --store-kind minio
 minio>=7.2
 # API + dashboard (Vaishnavi)

@@ -21,7 +21,6 @@ class StateStore:
         self.ttl = lease_ttl_s
 
     # ---------- helpers ----------
-           # ---------- helpers ----------
     def _write(self, name: str, data: dict) -> None:
         atomic_write_text(self.root / name, json.dumps(data))
 

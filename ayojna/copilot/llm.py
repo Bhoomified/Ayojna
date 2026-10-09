@@ -1,7 +1,7 @@
 """Optional LLM behind the copilot. Plain HTTPS via httpx, no SDKs. Providers:
 
   gemini    - Google Gemini API, FREE tier (key from aistudio.google.com) -> GEMINI_API_KEY
-  groq      - Groq cloud, FREE tier, very fast open models               -> GROQ_API_KEY
+  groq      - Groq cloud, FREE tier, fast open models (gpt-oss-120b)     -> GROQ_API_KEY
   ollama    - local model, free and offline (`ollama serve`)             -> no key
   anthropic - Claude API (paid)                                          -> ANTHROPIC_API_KEY
   none      - no LLM: the copilot answers from deterministic templates
@@ -27,7 +27,7 @@ from ayojna.settings import REPO_ROOT
 PROVIDERS = {  # name: (key env var, default model, default base url)
     "gemini": (
         "GEMINI_API_KEY",
-        "gemini-flash-latest,gemini-flash-lite-latest",  # 2nd model used if the 1st is busy,
+        "gemini-flash-latest,gemini-flash-lite-latest",  # 2nd model used if the 1st is busy
         "https://generativelanguage.googleapis.com",
     ),
     "groq": ("GROQ_API_KEY", "openai/gpt-oss-120b", "https://api.groq.com/openai/v1"),
