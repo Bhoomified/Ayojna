@@ -27,12 +27,28 @@
   .scroll { overflow:auto; max-height:360px; }
   .t-hot{color:var(--hot)} .t-warm{color:var(--warm)} .t-cold{color:var(--cold)} .t-archive{color:var(--archive)}
   .muted { color:var(--muted); } h2 .muted { text-transform:none; font-weight:400; letter-spacing:0; } canvas { max-height:280px; }
-    .ask { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+  .ask { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
   .ask input { flex:1 1 260px; min-width:0; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:9px 12px; font:inherit; }
   button { background:var(--line); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:8px 12px; font:inherit; cursor:pointer; }
   button:hover { border-color:var(--muted); } .chip { font-size:12px; padding:4px 10px; border-radius:999px; }
   #answer { margin-top:12px; white-space:pre-wrap; } .src { font-size:11px; padding:2px 8px; border-radius:999px; margin-right:6px; }
   .src.llm { background:#123d2c; color:var(--ok); } .src.template { background:var(--line); color:var(--muted); }
+  .rec { border:1px solid var(--line); border-radius:10px; padding:12px 14px; margin-top:10px; display:grid; gap:8px; }
+  .rec-top { display:flex; flex-wrap:wrap; gap:8px; align-items:center; justify-content:space-between; }
+  .rec-act { font-weight:600; } .verb { font-size:11px; padding:2px 8px; border-radius:999px; margin-right:8px; background:var(--line); }
+  .verb.Promote { background:#4a3712; color:var(--warm); } .verb.Demote { background:#12304a; color:var(--cold); } .verb.Archive { background:#2b2552; color:var(--archive); }
+  .facts { display:flex; flex-wrap:wrap; gap:6px 16px; font-size:12.5px; color:var(--muted); } .facts b { color:var(--text); font-weight:600; }
+  .pill { font-size:11px; padding:2px 8px; border-radius:999px; background:var(--line); color:var(--muted); }
+  .pill.approved { background:#123d2c; color:var(--ok); } .pill.rejected { background:#4a1717; color:var(--hot); }
+  .risk-high { color:var(--hot); } .risk-med { color:var(--warm); } .risk-low { color:var(--ok); }
+  .btns { display:flex; gap:6px; align-items:center; } .btn-ok { border-color:#1f6b4a; } .btn-no { border-color:#6b1f1f; }
+  .trace { display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); margin-top:12px; }
+  .stage table { font-size:12px; } .stage th, .stage td { padding:4px 6px; }
+  .stage { border:1px solid var(--line); border-radius:10px; padding:12px; min-width:0; } .stage h3 { margin:0 0 8px; font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
+  .bar { height:8px; border-radius:4px; background:var(--line); position:relative; margin:3px 0 8px; } .bar > i { position:absolute; top:0; bottom:0; border-radius:4px; }
+  .drv { display:grid; grid-template-columns:1fr 70px; gap:6px; align-items:center; font-size:12px; }
+  .tierchip { display:inline-block; font-size:11px; padding:2px 8px; border-radius:999px; margin:0 4px 4px 0; border:1px solid var(--line); }
+  .tierchip.no { text-decoration:line-through; opacity:.5; } .chosen td { background:#123d2c; }
   @media (max-width:600px) { header, main { padding-left:16px; padding-right:16px; } }
 </style>
 </head>
@@ -43,6 +59,11 @@
 </header>
 <main>
   <section class="grid" id="kpis"></section>
+  <section class="card"><h2>Recommendations <span id="recMeta" class="muted"></span></h2>
+    <div id="recSummary" class="muted">waiting for the first plan...</div>
+    <div id="recs"></div>
+    <div id="traceBox"></div>
+  </section>
   <section class="grid2">
     <div class="card"><h2>Monthly cost by strategy (digital twin, unseen hours)</h2><canvas id="costChart"></canvas></div>
     <div class="card"><h2>Cumulative cost over the scored hours</h2><canvas id="cumChart"></canvas></div>
@@ -50,9 +71,6 @@
   <section class="grid2">
     <div class="card"><h2>Live placement (catalog)</h2><canvas id="tierChart"></canvas><p id="placeNote" class="muted"></p></div>
     <div class="card"><h2>Last execution</h2><div id="exec" class="muted">waiting for the supervisor...</div></div>
-  </section>
-  <section class="card"><h2>Latest plan <span id="planMeta" class="muted"></span></h2>
-    <div class="scroll"><table><thead><tr><th>Extent</th><th>Move</th><th>$ / month</th><th>Risk</th><th>Why</th></tr></thead><tbody id="moves"></tbody></table></div>
   </section>
   <section class="card"><h2>Ask Ayojna <span id="llm" class="muted"></span></h2>
     <div id="chips" class="ask"></div>
@@ -118,7 +136,7 @@ function execution(x) {
   if (!x.available) return;
   box.replaceChildren();
   const t = el("table");
-  [["Mode", x.mode], ["Done", x.done ?? "-"], ["Skipped (idempotent)", x.skipped ?? "-"], ["Rolled back", x.rolled_back ?? "-"],
+  [["Mode", x.mode], ["Done", x.done ?? "-"], ["Awaiting approval", x.pending ?? 0], ["Rejected by operator", x.rejected ?? 0], ["Skipped (idempotent)", x.skipped ?? "-"], ["Rolled back", x.rolled_back ?? "-"],
    ["Over budget", x.over_budget ?? "-"], ["GB moved / budget", `${x.gb_moved ?? 0} / ${x.budget_gb ?? "-"}`], ["Fenced", x.fenced ? "yes" : "no"]]
   .forEach(([k, v]) => t.appendChild(row([k, String(v)])));
   box.appendChild(t);
@@ -126,15 +144,92 @@ function execution(x) {
     .forEach(p => box.appendChild(el("p", `rolled back ${p.key}: ${p.note}`, "t-hot")));
 }
 
-function plan(p) {
-  const body = document.getElementById("moves"); body.replaceChildren();
-  if (!p.available) return;
-  document.getElementById("planMeta").textContent =
-    `· ${p.n_moves} moves, ${p.total_gb} GB, $${p.saving_per_month}/month · ${p.envelope.model_version} · policy ${p.envelope.policy_version}`;
-  p.moves.forEach(m => {
-    const mv = el("td"); mv.append(el("span", m.from_tier, "t-" + m.from_tier), " → ", el("span", m.to_tier, "t-" + m.to_tier));
-    body.appendChild(row([`${m.volume}/${m.extent_id}`, mv, fmt(m.expected_saving_per_month, 4), m.risk, m.why]));
+const TIER_COLOR = { hot:"var(--hot)", warm:"var(--warm)", cold:"var(--cold)", archive:"var(--archive)" };
+const usd = v => (v < 0 ? "-$" : "$") + Math.abs(v).toFixed(v !== 0 && Math.abs(v) < 0.1 ? 4 : 2);
+
+function recommendations(r) {
+  const box = document.getElementById("recs");
+  if (!r.available) return;
+  const s = r.summary;
+  document.getElementById("recMeta").textContent = `· cycle hour ${r.hour} · ${r.model_version} · policy ${r.policy_version}`;
+  document.getElementById("recSummary").textContent = s.recommendations
+    ? `${s.recommendations} actions for ${s.moves} extents (${s.gb} GB): ${usd(s.saving_per_month)}/month. ${s.pending} awaiting a decision, ${s.approved} approved, ${s.rejected} rejected. Approved actions run on the next cycle in --approval mode.`
+    : "No action recommended: every extent already sits on its best allowed tier.";
+  box.replaceChildren();
+  r.items.forEach(it => {
+    const card = el("div", undefined, "rec");
+    const top = el("div", undefined, "rec-top");
+    const title = el("div"); title.append(el("span", it.verb, "verb " + it.verb), el("span", it.action, "rec-act"));
+    const btns = el("div", undefined, "btns");
+    const ok = el("button", "Approve", "btn-ok"), no = el("button", "Reject", "btn-no"), why = el("button", "Why?");
+    ok.onclick = () => decide(it.id, "approved"); no.onclick = () => decide(it.id, "rejected"); why.onclick = () => trace(it);
+    btns.append(el("span", it.status + (it.executed ? ` · ${it.executed} done` : ""), "pill " + it.status), ok, no, why);
+    top.append(title, btns);
+    const facts = el("div", undefined, "facts");
+    const fact = (k, v, cls) => { const f = el("span"); f.append(k + " ", el("b", v, cls)); facts.appendChild(f); };
+    fact(it.saving_per_month >= 0 ? "saves" : "costs", usd(Math.abs(it.saving_per_month)) + "/month");
+    fact("confidence", it.confidence === null ? "-" : Math.round(it.confidence * 100) + "%");
+    fact("risk", it.risk, "risk-" + it.risk);
+    fact("policy", it.policy || "no restrictions");
+    const drivers = el("div", undefined, "facts");
+    drivers.append("drivers:");
+    (it.drivers.length ? it.drivers : [{ feature: it.reason || "never accessed", effect: null }])
+      .forEach(d => drivers.append(el("span", d.effect === null ? d.feature : `${d.feature} ${d.effect > 0 ? "+" : ""}${d.effect}`, "pill")));
+    card.append(top, facts, drivers);
+    box.appendChild(card);
   });
+}
+
+async function decide(group, decision) {
+  await fetch("/api/recommendations/decide", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ group, decision }) });
+  refresh();
+}
+
+function bar(value, color, from = 0, scale = 100) {
+  const b = el("div", undefined, "bar"), i = el("i");
+  i.style.left = Math.max(0, Math.min(100, from)) + "%"; i.style.width = Math.min(100 - from, Math.abs(value) * scale) + "%"; i.style.background = color;
+  b.appendChild(i); return b;
+}
+
+async function trace(it) {
+  const box = document.getElementById("traceBox");
+  const d = await get("/api/recommendations/detail?group=" + encodeURIComponent(it.id));
+  box.replaceChildren();
+  if (!d.available) return;
+  const head = el("div", undefined, "rec-top");
+  const pick = el("select"); d.items.forEach((c, i) => { const o = el("option", c.extent); o.value = i; pick.appendChild(o); });
+  head.append(el("b", "Decision trace: " + it.action), pick);
+  const stages = el("div", undefined, "trace");
+  box.append(head, stages);
+  const show = c => {
+    stages.replaceChildren();
+    const p = c.prediction, st = (t) => { const s = el("div", undefined, "stage"); s.appendChild(el("h3", t)); stages.appendChild(s); return s; };
+    const s1 = st("1 · Predict (next 24 h)");
+    [["hot", p.p_hot], ["warm", p.p_warm], ["cold", p.p_cold]].forEach(([k, v]) => { s1.append(el("div", `${k} ${Math.round(v * 100)}%`, "muted")); s1.appendChild(bar(v, TIER_COLOR[k])); });
+    s1.append(el("div", `predicted ${p.label} · confidence ${Math.round(p.confidence * 100)}% · expected ${c.expected_ios_per_hour} I/Os per hour`, "muted"));
+    if (p.drivers.length) {
+      s1.append(el("div", "What drove it (effect on confidence):", "muted"));
+      p.drivers.forEach(dv => { const r = el("div", undefined, "drv"); const cell = el("div"); cell.append(el("div", `${dv.feature} = ${dv.value}`), bar(dv.effect, dv.effect >= 0 ? "var(--ok)" : "var(--hot)", dv.effect >= 0 ? 50 : 50 - Math.min(1, Math.abs(dv.effect)) * 50, 50)); r.append(cell, el("span", (dv.effect > 0 ? "+" : "") + dv.effect)); s1.appendChild(r); });
+    } else s1.append(el("div", p.reasons, "muted"));
+    const s2 = st("2 · Policy guard");
+    ["hot", "warm", "cold", "archive"].forEach(t => s2.appendChild(el("span", t, "tierchip" + (c.policy.allowed.includes(t) ? "" : " no"))));
+    s2.append(el("div", c.policy.rules, "muted"));
+    const s3 = st("3 · Cost over 24 h");
+    const t = el("table"); t.appendChild(row(["tier", "storage", "retrieval", "SLA risk", "move", "total"].map(h => el("th", h))));
+    Object.entries(c.costs_24h).forEach(([tier, k]) => {
+      const tr = k ? row([tier, ...["storage", "retrieval", "sla_risk", "move"].map(f => usd(k[f])), usd(k.storage + k.retrieval + k.sla_risk + k.move)]) : row([tier, "blocked by policy", "", "", "", ""]);
+      if (tier === c.decision.to) tr.className = "chosen"; t.appendChild(tr);
+    });
+    s3.appendChild(t);
+    const s4 = st("4 · Decision");
+    const mv = el("div"); mv.append(el("span", c.decision.from, "t-" + c.decision.from), " → ", el("b", c.decision.to, "t-" + c.decision.to)); s4.appendChild(mv);
+    [[`${c.decision.saving_per_month >= 0 ? "saves" : "costs"} ${usd(Math.abs(c.decision.saving_per_month))}/month`],
+     [c.decision.payback_hours === null ? "no payback needed (protects the SLA)" : `move pays for itself in ${c.decision.payback_hours} h`],
+     [`runner-up: ${c.decision.runner_up || "none"}`], [c.decision.why_not_cheaper]].forEach(([x]) => s4.appendChild(el("div", x, "muted")));
+  };
+  pick.onchange = () => show(d.items[Number(pick.value)]);
+  show(d.items[0]);
+  box.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 function audit(list) {
@@ -148,8 +243,8 @@ function audit(list) {
 
 async function refresh() {
   try {
-    const [k, s, p, pl, x, a] = await Promise.all(["/api/kpis", "/api/status", "/api/placement", "/api/plan", "/api/execution", "/api/audit?limit=30"].map(get));
-    kpis(k); status(s); placement(p); plan(pl); execution(x); audit(a);
+    const [k, s, p, rc, x, a] = await Promise.all(["/api/kpis", "/api/status", "/api/placement", "/api/recommendations", "/api/execution", "/api/audit?limit=30"].map(get));
+    kpis(k); status(s); placement(p); recommendations(rc); execution(x); audit(a);
   } catch (err) { document.getElementById("leader").textContent = "API unreachable: " + err; }
 }
 const EXAMPLES = ["How much are we saving?", "Why is web_0/3 on warm?", "Any rollbacks?", "Who is the leader?", "Policy for src1_2?", "Show the plan"];
