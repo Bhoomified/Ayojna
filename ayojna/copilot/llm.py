@@ -16,6 +16,7 @@ The LLM only ever writes text: it is never in the control loop and cannot move d
 from __future__ import annotations
 
 import os
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -26,15 +27,16 @@ from ayojna.settings import REPO_ROOT
 PROVIDERS = {  # name: (key env var, default model, default base url)
     "gemini": (
         "GEMINI_API_KEY",
-        "gemini-flash-latest",
+        "gemini-flash-latest,gemini-flash-lite-latest",  # 2nd model used if the 1st is busy,
         "https://generativelanguage.googleapis.com",
     ),
-    "groq": ("GROQ_API_KEY", "llama-3.3-70b-versatile", "https://api.groq.com/openai/v1"),
+    "groq": ("GROQ_API_KEY", "openai/gpt-oss-120b", "https://api.groq.com/openai/v1"),
     "ollama": ("", "llama3.2", "http://localhost:11434"),
     "anthropic": ("ANTHROPIC_API_KEY", "claude-haiku-4-5-20251001", "https://api.anthropic.com"),
 }
 AUTO_ORDER = ["gemini", "groq", "anthropic"]  # used when AYOJNA_LLM is not set
-
+RETRY_STATUS = {429, 500, 502, 503, 504}  # busy / overloaded: wait a moment, try again
+RETRY_WAIT_S = (1.0, 2.5)
 
 class LLMUnavailable(RuntimeError):
     """No LLM configured, or every provider failed. The copilot falls back to templates."""
@@ -120,18 +122,21 @@ def _call(cfg: LLMConfig, system: str, user: str, client: httpx.Client) -> str:
         parts = r.json()["candidates"][0]["content"]["parts"]
         return "".join(p.get("text", "") for p in parts if not p.get("thought"))
     if cfg.provider == "groq":
+        body = {
+            "model": cfg.model,
+            "temperature": 0,
+            "max_tokens": 1024,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        }
+        if "gpt-oss" in cfg.model:
+            body["reasoning_effort"] = "low"  # short answers: keep thinking tokens small
         r = client.post(
             f"{cfg.base_url}/chat/completions",
             headers={"Authorization": f"Bearer {cfg.api_key}"},
-            json={
-                "model": cfg.model,
-                "temperature": 0,
-                "max_tokens": 400,
-                "messages": [
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
-            },
+            json=body,
         )
         r.raise_for_status()
         return r.json()["choices"][0]["message"]["content"]
@@ -164,6 +169,21 @@ def _call(cfg: LLMConfig, system: str, user: str, client: httpx.Client) -> str:
     r.raise_for_status()
     return r.json()["message"]["content"]
 
+def _call_with_retry(cfg: LLMConfig, system: str, user: str, client: httpx.Client) -> str:
+    """Try each model of the provider (comma-separated); retry briefly when it is busy."""
+    last: Exception | None = None
+    for model in [m.strip() for m in cfg.model.split(",") if m.strip()]:
+        one = LLMConfig(cfg.provider, model, cfg.base_url, cfg.api_key, cfg.timeout_s)
+        for wait in (*RETRY_WAIT_S, None):
+            try:
+                return _call(one, system, user, client)
+            except httpx.HTTPStatusError as exc:
+                last = exc
+                if exc.response.status_code not in RETRY_STATUS:
+                    break  # e.g. 404 model not found: try the next model
+                if wait is not None:
+                    time.sleep(wait)
+    raise last if last else LLMUnavailable(f"{cfg.provider}: no model configured")
 
 def complete(
     system: str, user: str, cfg: LLMConfig | None = None, client: httpx.Client | None = None
@@ -178,7 +198,7 @@ def complete(
         own = client is None
         http = client or httpx.Client(timeout=c.timeout_s)
         try:
-            text = _call(c, system, user, http).strip()
+            text = _call_with_retry(c, system, user, http).strip()
             if not text:
                 raise LLMUnavailable(f"{c.provider}: empty answer")
             ans = Answer(text)

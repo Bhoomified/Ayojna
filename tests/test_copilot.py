@@ -104,7 +104,7 @@ def test_grounded_llm_answer_is_used(tmp_path):
 def test_invented_numbers_are_rejected(tmp_path):
     svc, _, _ = _state(tmp_path)
     r = ask("savings?", svc, llm=lambda s, u: "Ayojna saves 91.2% every month.")
-    assert r["source"] == "template" and "91.2" in r["note"] and "68.53%" in r["answer"]
+    assert r["source"] == "template" and "91.2" in r["note"] and "68.5%" in r["answer"]
 
 
 def test_llm_sees_only_facts(tmp_path):

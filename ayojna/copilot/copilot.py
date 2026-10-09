@@ -86,7 +86,7 @@ def gather(svc: Service, intent: str, args: dict) -> dict:
 
 
 def _pct(v) -> str:
-    return "unknown" if v is None else f"{v}%"
+       return "unknown" if v is None else f"{round(float(v), 1)}%"
 
 
 def template(intent: str, f: dict) -> str:

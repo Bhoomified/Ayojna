@@ -2,7 +2,7 @@ import json
 import os
 
 import httpx
-
+import ayojna.copilot.llm as llm
 from ayojna.copilot.guard import numbers_in, ungrounded_numbers
 from ayojna.copilot.llm import (
     LLMConfig,
@@ -39,6 +39,8 @@ class _env:
             if self.saved[k] is not None:
                 os.environ[k] = self.saved[k]
 
+llm.RETRY_WAIT_S = (0, 0)  # no real waiting in tests
+llm.load_dotenv = lambda *args, **kwargs: None  # tests never read your real .env
 
 def _client(handler):
     return httpx.Client(transport=httpx.MockTransport(handler))
@@ -170,3 +172,37 @@ def test_guard_flags_invented_numbers():
 
 def test_numbers_in_reads_strings():
     assert numbers_in({"why": "I/Os in the last 72 h = 107"}) >= {72.0, 107.0}
+
+def test_busy_model_is_retried_then_succeeds():
+    calls = []
+
+    def handler(req):
+        calls.append(1)
+        if len(calls) == 1:
+            return httpx.Response(503, json={"error": {"message": "high demand"}})
+        return httpx.Response(200, json={"candidates": [{"content": {"parts": [{"text": "ok"}]}}]})
+
+    cfg = LLMConfig("gemini", "gemini-flash-latest", "https://g.test", "gk")
+    assert complete("s", "q", cfg, _client(handler)) == "ok" and len(calls) == 2
+
+
+def test_second_model_used_when_first_is_missing_or_busy():
+    def handler(req):
+        if "model-a" in req.url.path:
+            return httpx.Response(404, json={"error": {"message": "not found"}})
+        return httpx.Response(200, json={"candidates": [{"content": {"parts": [{"text": "b"}]}}]})
+
+    cfg = LLMConfig("gemini", "model-a, model-b", "https://g.test", "gk")
+    assert complete("s", "q", cfg, _client(handler)) == "b"
+
+
+def test_groq_gpt_oss_asks_for_low_reasoning():
+    seen = {}
+
+    def handler(req):
+        seen["body"] = json.loads(req.content)
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    cfg = LLMConfig("groq", "openai/gpt-oss-120b", "https://q.test/openai/v1", "qk")
+    complete("s", "q", cfg, _client(handler))
+    assert seen["body"]["reasoning_effort"] == "low" and seen["body"]["max_tokens"] == 1024
